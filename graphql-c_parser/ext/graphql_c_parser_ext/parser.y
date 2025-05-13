@@ -11,8 +11,17 @@ void yyerror(VALUE, VALUE, const char*);
 
 static VALUE GraphQL_Language_Nodes_NONE;
 static VALUE r_string_query;
+static VALUE r_string_mutation;
+static VALUE r_string_subscription;
 
-#define MAKE_AST_NODE(node_class_name, nargs, ...) rb_funcall(GraphQL_Language_Nodes_##node_class_name, rb_intern("from_a"), nargs + 1, filename,__VA_ARGS__)
+// Cached IDs for performance
+static ID id_next_token_index;
+static ID id_tokens;
+static ID id_from_a;
+static ID id_line;
+static ID id_col;
+
+#define MAKE_AST_NODE(node_class_name, nargs, ...) rb_funcall(GraphQL_Language_Nodes_##node_class_name, id_from_a, nargs + 1, filename,__VA_ARGS__)
 
 #define SETUP_NODE_CLASS_VARIABLE(node_class_name) static VALUE GraphQL_Language_Nodes_##node_class_name;
 
@@ -108,8 +117,8 @@ SETUP_NODE_CLASS_VARIABLE(SchemaExtension)
     VALUE position_source = rb_ary_entry($1, 0);
     VALUE line, col;
     if (RB_TEST(position_source)) {
-      line = rb_funcall(position_source, rb_intern("line"), 0);
-      col = rb_funcall(position_source, rb_intern("col"), 0);
+      line = rb_funcall(position_source, id_line, 0);
+      col = rb_funcall(position_source, id_col, 0);
     } else {
       line = INT2FIX(1);
       col = INT2FIX(1);
@@ -458,7 +467,7 @@ SETUP_NODE_CLASS_VARIABLE(SchemaExtension)
 
   type:
       nullable_type
-    | nullable_type BANG      { $$ = MAKE_AST_NODE(NonNullType, 3, rb_funcall($1, rb_intern("line"), 0), rb_funcall($1, rb_intern("col"), 0), $1); }
+    | nullable_type BANG      { $$ = MAKE_AST_NODE(NonNullType, 3, rb_funcall($1, id_line, 0), rb_funcall($1, id_col, 0), $1); }
 
   nullable_type:
       name                   {
@@ -470,8 +479,8 @@ SETUP_NODE_CLASS_VARIABLE(SchemaExtension)
       }
     | LBRACKET type RBRACKET {
         $$ = MAKE_AST_NODE(ListType, 3,
-          rb_funcall($2, rb_intern("line"), 0),
-          rb_funcall($2, rb_intern("col"), 0),
+          rb_funcall($2, id_line, 0),
+          rb_funcall($2, id_col, 0),
           $2
         );
       }
@@ -487,9 +496,9 @@ type_system_definition:
           rb_ary_entry($1, 1),
           rb_ary_entry($1, 2),
           // TODO use static strings:
-          rb_hash_aref($3, rb_str_new_cstr("query")),
-          rb_hash_aref($3, rb_str_new_cstr("mutation")),
-          rb_hash_aref($3, rb_str_new_cstr("subscription")),
+          rb_hash_aref($3, r_string_query),
+          rb_hash_aref($3, r_string_mutation),
+          rb_hash_aref($3, r_string_subscription),
           $2
         );
       }
@@ -749,9 +758,9 @@ type_system_definition:
           rb_ary_entry($1, 1),
           rb_ary_entry($1, 2),
           // TODO use static strings:
-          rb_hash_aref($5, rb_str_new_cstr("query")),
-          rb_hash_aref($5, rb_str_new_cstr("mutation")),
-          rb_hash_aref($5, rb_str_new_cstr("subscription")),
+          rb_hash_aref($5, r_string_query),
+          rb_hash_aref($5, r_string_mutation),
+          rb_hash_aref($5, r_string_subscription),
           $3
         );
       }
@@ -886,15 +895,15 @@ type_system_definition:
 
 // Custom functions
 int yylex (YYSTYPE *lvalp, VALUE parser, VALUE filename) {
-  VALUE next_token_idx_rb_int = rb_ivar_get(parser, rb_intern("@next_token_index"));
+  VALUE next_token_idx_rb_int = rb_ivar_get(parser, id_next_token_index);
   int next_token_idx = FIX2INT(next_token_idx_rb_int);
-  VALUE tokens = rb_ivar_get(parser, rb_intern("@tokens"));
+  VALUE tokens = rb_ivar_get(parser, id_tokens);
   VALUE next_token = rb_ary_entry(tokens, next_token_idx);
 
   if (!RB_TEST(next_token)) {
     return YYEOF;
   }
-  rb_ivar_set(parser, rb_intern("@next_token_index"), INT2FIX(next_token_idx + 1));
+  rb_ivar_set(parser, id_next_token_index, INT2FIX(next_token_idx + 1));
   VALUE token_type_rb_int = rb_ary_entry(next_token, 4);
   int next_token_type = FIX2INT(token_type_rb_int);
   if (next_token_type == 241) { // BAD_UNICODE_ESCAPE
@@ -938,6 +947,21 @@ void initialize_node_class_variables() {
   rb_global_variable(&r_string_query);
   r_string_query = rb_str_new_cstr("query");
   rb_str_freeze(r_string_query);
+
+  rb_global_variable(&r_string_mutation);
+  r_string_mutation = rb_str_new_cstr("mutation");
+  rb_str_freeze(r_string_mutation);
+
+  rb_global_variable(&r_string_subscription);
+  r_string_subscription = rb_str_new_cstr("subscription");
+  rb_str_freeze(r_string_subscription);
+
+  // Initialize cached IDs
+  id_next_token_index = rb_intern("@next_token_index");
+  id_tokens = rb_intern("@tokens");
+  id_from_a = rb_intern("from_a");
+  id_line = rb_intern("line");
+  id_col = rb_intern("col");
 
   INITIALIZE_NODE_CLASS_VARIABLE(Argument)
   INITIALIZE_NODE_CLASS_VARIABLE(Directive)
